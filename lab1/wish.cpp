@@ -7,6 +7,9 @@
 
 using namespace std;
 
+// Шляхи пошуку виконуваних файлів (за замовчуванням /bin)
+vector<string> search_path = {"/bin"};
+
 // Єдине повідомлення про помилку за специфікацією
 void print_error() {
     const char error_message[] = "An error has occurred\n";
@@ -62,7 +65,28 @@ void execute_line(const string& line) {
         exit(0);
     }
 
-    // Поки що інші команди не реалізовані
+    // Вбудована команда: cd (рівно 1 аргумент)
+    if (cmd == "cd") {
+        if (args.size() != 2) {
+            print_error();
+            return;
+        }
+        if (chdir(args[1].c_str()) != 0) {
+            print_error();
+        }
+        return;
+    }
+
+    // Вбудована команда: path (перезаписує список шляхів)
+    if (cmd == "path") {
+        search_path.clear();
+        for (size_t i = 1; i < args.size(); i++) {
+            search_path.push_back(args[i]);
+        }
+        return;
+    }
+
+    // Зовнішні команди — поки не реалізовані
 }
 
 int main(int argc, char* argv[]) {
