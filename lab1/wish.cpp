@@ -5,6 +5,7 @@
 #include <cstring>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 
 using namespace std;
 
@@ -47,15 +48,65 @@ vector<string> tokenize(const string& str) {
     return tokens;
 }
 
+// Парсинг команди та перевірка перенаправлення виводу (>)
+bool parse_command(const string& cmd_str, vector<string>& args, string& output_file) {
+    size_t count_redir = 0;
+    for (char c : cmd_str) {
+        if (c == '>') count_redir++;
+    }
+
+    // Більше ніж один символ '>' — синтаксична помилка
+    if (count_redir > 1) {
+        return false;
+    }
+
+    // Рівно один символ '>'
+    if (count_redir == 1) {
+        size_t pos = cmd_str.find('>');
+        string left = cmd_str.substr(0, pos);
+        string right = cmd_str.substr(pos + 1);
+
+        args = tokenize(left);
+        vector<string> redir_tokens = tokenize(right);
+
+        // Потрібна команда зліва і рівно один файл справа
+        if (args.empty() || redir_tokens.size() != 1) {
+            return false;
+        }
+
+        output_file = redir_tokens[0];
+        return true;
+    }
+
+    // Без перенаправлення
+    args = tokenize(cmd_str);
+    output_file = "";
+    return true;
+}
+
 // Обробка одного рядка вводу
 void execute_line(const string& line) {
     string trimmed = trim(line);
     if (trimmed.empty()) return;
 
-    vector<string> args = tokenize(trimmed);
+    vector<string> args;
+    string output_file;
+    if (!parse_command(trimmed, args, output_file)) {
+        print_error();
+        return;
+    }
+
     if (args.empty()) return;
 
     string cmd = args[0];
+
+    // Вбудовані команди не підтримують перенаправлення
+    if (cmd == "exit" || cmd == "cd" || cmd == "path") {
+        if (!output_file.empty()) {
+            print_error();
+            return;
+        }
+    }
 
     // Вбудована команда: exit
     if (cmd == "exit") {
@@ -116,7 +167,18 @@ void execute_line(const string& line) {
     }
 
     if (pid == 0) {
-        // Дочірній процес
+        // Дочірній процес: налаштовуємо перенаправлення виводу якщо є
+        if (!output_file.empty()) {
+            int fd = open(output_file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+            if (fd < 0) {
+                print_error();
+                _exit(1);
+            }
+            dup2(fd, STDOUT_FILENO);
+            dup2(fd, STDERR_FILENO);
+            close(fd);
+        }
+
         execv(full_path.c_str(), argv_ptrs.data());
         // Якщо execv повернувся — помилка
         print_error();
