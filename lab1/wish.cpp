@@ -4,6 +4,7 @@
 #include <vector>
 #include <cstring>
 #include <unistd.h>
+#include <sys/wait.h>
 
 using namespace std;
 
@@ -86,7 +87,44 @@ void execute_line(const string& line) {
         return;
     }
 
-    // Зовнішні команди — поки не реалізовані
+    // Зовнішня команда: шукаємо бінарник у search_path
+    string full_path = "";
+    for (size_t i = 0; i < search_path.size(); i++) {
+        string candidate = search_path[i] + "/" + cmd;
+        if (access(candidate.c_str(), X_OK) == 0) {
+            full_path = candidate;
+            break;
+        }
+    }
+
+    if (full_path.empty()) {
+        print_error();
+        return;
+    }
+
+    // Формуємо argv для execv
+    vector<char*> argv_ptrs;
+    for (size_t i = 0; i < args.size(); i++) {
+        argv_ptrs.push_back(const_cast<char*>(args[i].c_str()));
+    }
+    argv_ptrs.push_back(nullptr);
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        print_error();
+        return;
+    }
+
+    if (pid == 0) {
+        // Дочірній процес
+        execv(full_path.c_str(), argv_ptrs.data());
+        // Якщо execv повернувся — помилка
+        print_error();
+        _exit(1);
+    }
+
+    // Батьківський процес: чекаємо завершення дочірнього
+    waitpid(pid, nullptr, 0);
 }
 
 int main(int argc, char* argv[]) {
