@@ -48,6 +48,22 @@ vector<string> tokenize(const string& str) {
     return tokens;
 }
 
+// Розбиття рядка за символом-розділювачем
+vector<string> split_by_char(const string& str, char delim) {
+    vector<string> parts;
+    size_t start = 0;
+    while (start < str.size()) {
+        size_t pos = str.find(delim, start);
+        if (pos == string::npos) {
+            parts.push_back(str.substr(start));
+            break;
+        }
+        parts.push_back(str.substr(start, pos - start));
+        start = pos + 1;
+    }
+    return parts;
+}
+
 // Парсинг команди та перевірка перенаправлення виводу (>)
 bool parse_command(const string& cmd_str, vector<string>& args, string& output_file) {
     size_t count_redir = 0;
@@ -84,109 +100,125 @@ bool parse_command(const string& cmd_str, vector<string>& args, string& output_f
     return true;
 }
 
-// Обробка одного рядка вводу
+// Обробка одного рядка вводу (з підтримкою & та >)
 void execute_line(const string& line) {
     string trimmed = trim(line);
     if (trimmed.empty()) return;
 
-    vector<string> args;
-    string output_file;
-    if (!parse_command(trimmed, args, output_file)) {
-        print_error();
-        return;
-    }
+    // Розбиваємо рядок на паралельні команди за розділювачем &
+    vector<string> subcmds = split_by_char(trimmed, '&');
+    vector<pid_t> pids;
 
-    if (args.empty()) return;
+    for (size_t c = 0; c < subcmds.size(); c++) {
+        string cmd_str = trim(subcmds[c]);
+        if (cmd_str.empty()) continue;
 
-    string cmd = args[0];
-
-    // Вбудовані команди не підтримують перенаправлення
-    if (cmd == "exit" || cmd == "cd" || cmd == "path") {
-        if (!output_file.empty()) {
+        vector<string> args;
+        string output_file;
+        if (!parse_command(cmd_str, args, output_file)) {
             print_error();
-            return;
+            continue;
         }
-    }
 
-    // Вбудована команда: exit
-    if (cmd == "exit") {
-        if (args.size() > 1) {
-            print_error();
-            return;
-        }
-        exit(0);
-    }
+        if (args.empty()) continue;
 
-    // Вбудована команда: cd (рівно 1 аргумент)
-    if (cmd == "cd") {
-        if (args.size() != 2) {
-            print_error();
-            return;
-        }
-        if (chdir(args[1].c_str()) != 0) {
-            print_error();
-        }
-        return;
-    }
+        string cmd = args[0];
 
-    // Вбудована команда: path (перезаписує список шляхів)
-    if (cmd == "path") {
-        search_path.clear();
-        for (size_t i = 1; i < args.size(); i++) {
-            search_path.push_back(args[i]);
-        }
-        return;
-    }
-
-    // Зовнішня команда: шукаємо бінарник у search_path
-    string full_path = "";
-    for (size_t i = 0; i < search_path.size(); i++) {
-        string candidate = search_path[i] + "/" + cmd;
-        if (access(candidate.c_str(), X_OK) == 0) {
-            full_path = candidate;
-            break;
-        }
-    }
-
-    if (full_path.empty()) {
-        print_error();
-        return;
-    }
-
-    // Формуємо argv для execv
-    vector<char*> argv_ptrs;
-    for (size_t i = 0; i < args.size(); i++) {
-        argv_ptrs.push_back(const_cast<char*>(args[i].c_str()));
-    }
-    argv_ptrs.push_back(nullptr);
-
-    pid_t pid = fork();
-    if (pid < 0) {
-        print_error();
-        return;
-    }
-
-    if (pid == 0) {
-        // Дочірній процес: налаштовуємо перенаправлення виводу якщо є
-        if (!output_file.empty()) {
-            int fd = open(output_file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
-            if (fd < 0) {
+        // Вбудовані команди
+        if (cmd == "exit" || cmd == "cd" || cmd == "path") {
+            if (!output_file.empty()) {
                 print_error();
-                _exit(1);
+                continue;
             }
-            dup2(fd, STDOUT_FILENO);
-            dup2(fd, STDERR_FILENO);
-            close(fd);
+
+            // Вбудована команда: exit
+            if (cmd == "exit") {
+                if (args.size() > 1) {
+                    print_error();
+                    continue;
+                }
+                // Чекаємо запущені процеси перед завершенням
+                for (size_t p = 0; p < pids.size(); p++) {
+                    waitpid(pids[p], nullptr, 0);
+                }
+                exit(0);
+            }
+
+            // Вбудована команда: cd (рівно 1 аргумент)
+            if (cmd == "cd") {
+                if (args.size() != 2) {
+                    print_error();
+                } else if (chdir(args[1].c_str()) != 0) {
+                    print_error();
+                }
+                continue;
+            }
+
+            // Вбудована команда: path (перезаписує список шляхів)
+            if (cmd == "path") {
+                search_path.clear();
+                for (size_t i = 1; i < args.size(); i++) {
+                    search_path.push_back(args[i]);
+                }
+                continue;
+            }
         }
 
-        execv(full_path.c_str(), argv_ptrs.data());
-        // Якщо execv повернувся — помилка
-        print_error();
-        _exit(1);
+        // Зовнішня команда: шукаємо бінарник у search_path
+        string full_path = "";
+        for (size_t i = 0; i < search_path.size(); i++) {
+            string candidate = search_path[i] + "/" + cmd;
+            if (access(candidate.c_str(), X_OK) == 0) {
+                full_path = candidate;
+                break;
+            }
+        }
+
+        if (full_path.empty()) {
+            print_error();
+            continue;
+        }
+
+        // Формуємо argv для execv
+        vector<char*> argv_ptrs;
+        for (size_t i = 0; i < args.size(); i++) {
+            argv_ptrs.push_back(const_cast<char*>(args[i].c_str()));
+        }
+        argv_ptrs.push_back(nullptr);
+
+        pid_t pid = fork();
+        if (pid < 0) {
+            print_error();
+            continue;
+        }
+
+        if (pid == 0) {
+            // Дочірній процес: налаштовуємо перенаправлення виводу якщо є
+            if (!output_file.empty()) {
+                int fd = open(output_file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+                if (fd < 0) {
+                    print_error();
+                    _exit(1);
+                }
+                dup2(fd, STDOUT_FILENO);
+                dup2(fd, STDERR_FILENO);
+                close(fd);
+            }
+
+            execv(full_path.c_str(), argv_ptrs.data());
+            // Якщо execv повернувся — помилка
+            print_error();
+            _exit(1);
+        }
+
+        // Батьківський процес: зберігаємо pid
+        pids.push_back(pid);
     }
 
-    // Батьківський процес: чекаємо завершення дочірнього
-    waitpid(pid, nullptr, 0);
+    // Чекаємо завершення всіх запущених паралельних процесів
+    for (size_t p = 0; p < pids.size(); p++) {
+        waitpid(pids[p], nullptr, 0);
+    }
 }
 
 int main(int argc, char* argv[]) {
