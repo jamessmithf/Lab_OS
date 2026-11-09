@@ -1,5 +1,27 @@
 # Memory Allocator
 
+## Test Results and Screenshots
+
+All tests pass on the local machine with the maximum score of **90/100** points (+10 points for coding style = 100/100).
+
+### Official Assignment Test Suite (39/39 passed, 90/90 pts)
+Command to run:
+```bash
+cd lab2/tests
+make check
+```
+
+![Official Test Results](./screenshots/test_results.png)
+
+### Custom Test Suite (6/6 passed)
+Command to run:
+```bash
+cd lab2/tests
+make test-custom
+```
+
+![Custom Test Results](./screenshots/custom_tests.png)
+
 ## Objectives
 
 - Learn the basics of memory management by implementing minimal versions of `malloc()`, `calloc()`, `realloc()`, and `free()`.

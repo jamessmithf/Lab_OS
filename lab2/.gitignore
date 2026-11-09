@@ -5,3 +5,4 @@ src.zip
 tests/out/
 tests/snippets/test-*
 !tests/snippets/test-*.c
+tests/custom_tests
