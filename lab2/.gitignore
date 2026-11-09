@@ -1,0 +1,7 @@
+*.o
+*.so
+*.out
+src.zip
+tests/out/
+tests/snippets/test-*
+!tests/snippets/test-*.c
