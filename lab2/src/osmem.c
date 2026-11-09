@@ -5,11 +5,13 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <string.h>
+#include <stdint.h>
 
 #define ALIGNMENT 8
 #define ALIGN(size) (((size) + (ALIGNMENT - 1)) & ~(ALIGNMENT - 1))
 #define METADATA_SIZE ALIGN(sizeof(struct block_meta))
 #define MMAP_THRESHOLD (128 * 1024)
+#define MAX_ALLOC_SIZE ((size_t)-1 - METADATA_SIZE - ALIGNMENT)
 
 static struct block_meta *heap_start;
 static int heap_preallocated;
@@ -46,8 +48,11 @@ static struct block_meta *find_best_block(size_t aligned_size)
 
 	for (struct block_meta *curr = heap_start; curr != NULL; curr = curr->next) {
 		if (curr->status == STATUS_FREE && curr->size >= aligned_size) {
-			if (best == NULL || curr->size < best->size)
+			if (best == NULL || curr->size < best->size) {
 				best = curr;
+				if (best->size == aligned_size)
+					break;
+			}
 		}
 	}
 	return best;
@@ -124,7 +129,7 @@ static void *alloc_heap(size_t aligned_size)
 
 void *os_malloc(size_t size)
 {
-	if (size == 0)
+	if (size == 0 || size > MAX_ALLOC_SIZE)
 		return NULL;
 
 	size_t aligned_size = ALIGN(size);
@@ -167,11 +172,10 @@ void *os_calloc(size_t nmemb, size_t size)
 	if (nmemb == 0 || size == 0)
 		return NULL;
 
-	size_t total_bytes = nmemb * size;
-
-	if (total_bytes / nmemb != size)
+	if (nmemb > MAX_ALLOC_SIZE / size)
 		return NULL;
 
+	size_t total_bytes = nmemb * size;
 	size_t aligned_size = ALIGN(total_bytes);
 	size_t total_size = aligned_size + METADATA_SIZE;
 	size_t page_size = (size_t)getpagesize();
@@ -206,19 +210,23 @@ void *os_realloc(void *ptr, size_t size)
 		return NULL;
 	}
 
+	if (size > MAX_ALLOC_SIZE)
+		return NULL;
+
 	struct block_meta *block = (struct block_meta *)ptr - 1;
 
 	if (block->status == STATUS_FREE)
 		return NULL;
 
 	size_t aligned_size = ALIGN(size);
+	size_t orig_size = block->size;
 
 	if (block->status == STATUS_MAPPED) {
 		void *new_ptr = os_malloc(size);
 
 		if (new_ptr == NULL)
 			return NULL;
-		size_t copy_size = (block->size < size) ? block->size : size;
+		size_t copy_size = (orig_size < size) ? orig_size : size;
 
 		memcpy(new_ptr, ptr, copy_size);
 		os_free(ptr);
@@ -231,7 +239,7 @@ void *os_realloc(void *ptr, size_t size)
 
 		if (new_ptr == NULL)
 			return NULL;
-		size_t copy_size = (block->size < size) ? block->size : size;
+		size_t copy_size = (orig_size < size) ? orig_size : size;
 
 		memcpy(new_ptr, ptr, copy_size);
 		os_free(ptr);
@@ -276,7 +284,7 @@ void *os_realloc(void *ptr, size_t size)
 
 	if (new_ptr == NULL)
 		return NULL;
-	size_t copy_size = (block->size < size) ? block->size : size;
+	size_t copy_size = (orig_size < size) ? orig_size : size;
 
 	memcpy(new_ptr, ptr, copy_size);
 	os_free(ptr);
